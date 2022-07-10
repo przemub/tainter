@@ -65,10 +65,21 @@ class TaintVisitor(ast.NodeVisitor):
         else:
             message += f"Lines {node.lineno}-{node.end_lineno} tainted:\n"
 
-        # Print the whole tainted line
+        # Print the whole tainted line and underline the problem
+        underline_start, underline_end = node.col_offset, node.end_col_offset
         node.col_offset = 0
         node.end_col_offset = -1
-        message += ast.get_source_segment(self._source, node)
+        message += ast.get_source_segment(self._source, node) + "\n"
+
+        underline = ""
+        counter = 0
+        while counter < underline_start:
+            counter += 1
+            underline += " "
+        while counter < underline_end:
+            counter += 1
+            underline += "^"
+        message += underline
 
         tainted_variables = find_subnodes(
             node, (Name,), id=self.tainted_variables
@@ -89,13 +100,16 @@ class TaintVisitor(ast.NodeVisitor):
                 reason, tab
             )
 
-    def __init__(self, tainted_because: dict[str, ast.AST], source: str):
+    def __init__(self, tree: ast.AST, tainted_because: dict[str, ast.AST], source: str):
         self._source = source
         self._tainted_because = tainted_because
         self._tainted_nodes: list[ast.AST] = []
 
         # Preserve output for further analysis.
         self.output = ""
+
+        self.tree = tree
+        self.visit(tree)
 
     @property
     def tainted_variables(self):
@@ -110,8 +124,7 @@ class TaintVisitor(ast.NodeVisitor):
             self._tainted_nodes.append(node)
 
     def visit_Assign(self, node: Assign):
-        visitor = TaintVisitor(self._tainted_because, self._source)
-        visitor.visit(node.value)
+        visitor = TaintVisitor(node.value, self._tainted_because, self._source)
 
         if visitor.tainted_nodes:
             for variable in node.targets:
@@ -128,8 +141,7 @@ class TaintVisitor(ast.NodeVisitor):
         if node.value is None:
             return
 
-        visitor = TaintVisitor(self._tainted_because, self._source)
-        visitor.visit(node.value)
+        visitor = TaintVisitor(node.value, self._tainted_because, self._source)
 
         if visitor.tainted_nodes:
             for item in visitor.tainted_nodes:
@@ -140,8 +152,7 @@ class TaintVisitor(ast.NodeVisitor):
 def taint(function: FunctionDef, argument: str, source):
     for arg in function.args.args:
         if arg.arg == argument:
-            visitor = TaintVisitor({argument: arg}, source)
-            visitor.visit(function)
+            visitor = TaintVisitor(function, {argument: arg}, source)
             return visitor
 
     raise ValueError("The given argument does not exist in this function.")
