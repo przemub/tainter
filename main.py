@@ -233,11 +233,23 @@ def taint(function: FunctionDef, argument: str, source):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Tainting tracker.')
-    parser.add_argument("filename")
-    parser.add_argument("function")
-    parser.add_argument("-d", "--dump", action="store_true")
-    parser.add_argument("-t", "--taint", action="extend", nargs="+")
+    parser = argparse.ArgumentParser(description=f"""
+Taint analysis is a type of a static analysis of source code.
+
+It is used to analyse the flow of information in the code, so
+we can make sure that there are no unintended leaks.
+
+For starters, check out the examples files to see how taint spreads.
+
+Then run the tainter on any of the examples, for example:
+{sys.argv[0]} --taint a examples/assignment.py chain
+to see how the return value is tainted by input "a" in function chain
+in file assingment.py.
+""", formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("filename", help="File to analyse.")
+    parser.add_argument("function", help="Function to analyse.")
+    parser.add_argument("-d", "--dump", action="store_true", help="If selected, dump the AST for the function.")
+    parser.add_argument("-t", "--tainted-arg", action="extend", nargs="+", help="Mark a function argument as tainted.")
     args = parser.parse_args()
 
     source, my_ast = load_file(args.filename)
