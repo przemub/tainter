@@ -46,6 +46,13 @@ class Safe(metaclass=_SafeMeta):
         raise NotImplementedError()
 
 
+# Some functions should be considered output by default.
+OUTPUT_FUNCTIONS = [
+    "print",
+    "sys.write"
+]
+
+
 class _OutputMeta(type):
     """
     A metaclass which instead of using normal subclassing semantics,
@@ -61,6 +68,8 @@ class _OutputMeta(type):
 
     def __instancecheck__(self, instance):
         """Instance is a subinstance iff it has _SAFE_ATTRIBUTE."""
+        if instance.__name__ in self.OUTPUT_FUNCTIONS:
+            return True
         return getattr(instance, _OUTPUT_ATTRIBUTE, None) is not None
 
     @classmethod

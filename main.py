@@ -12,6 +12,8 @@ from warnings import warn
 
 from termcolor import colored
 
+import utils
+
 T = TypeVar("T", bound=ast.AST)
 
 logger = logging.getLogger(__name__)
@@ -135,6 +137,26 @@ class TaintVisitor(ast.NodeVisitor):
 
         return results
 
+    @cached_property
+    def output_functions(self) -> list[str]:
+        """Collect and return the list of functions marked with mark_output."""
+        # TODO: Collect also the imported functions.
+        # TODO: Collect functions marked without the @ decorator syntax.
+        #       This will be useful for marking imported functions.
+
+        results = []
+
+        tree = ast.parse(self._source)
+        functions = find_subnodes(tree, [FunctionDef])
+        for function in functions:
+            for decorator in function.decorator_list:
+                if not isinstance(decorator, Name):
+                    continue
+                if decorator.id == "mark_output":
+                    results.append(function.name)
+
+        return results + utils.OUTPUT_FUNCTIONS
+
     @property
     def tainted_variables(self):
         return self._tainted_because.keys()
@@ -161,7 +183,7 @@ class TaintVisitor(ast.NodeVisitor):
         """
         If the function call was determined safe, don't go down.
         If the function call was determined an output, shout when a tainted
-        variable is used.
+        variable is passed as an argument.
         Otherwise, continue as usual.
         """
 
@@ -170,10 +192,23 @@ class TaintVisitor(ast.NodeVisitor):
             return
         if node.func.id in self.safe_functions:
             return
-        #if node.func.id in self.output_functions:
-        # pass
+        if node.func.id in self.output_functions:
+            for arg in node.args:
+                self._check_if_not_tainted(arg)
 
         return super().generic_visit(node)
+
+    def _check_if_not_tainted(self, node: ast.AST):
+        """
+        Node value will be output to the user, therefore check if it uses
+        anything tainted and shout if so.
+        """
+        visitor = TaintVisitor(node, self._tainted_because, self._source)
+
+        if visitor.tainted_nodes:
+            for _ in visitor.tainted_nodes:
+                self._tainted_nodes += [node]
+                self._warn_tainted(node)
 
 
     def visit_Return(self, node: Return):
@@ -184,12 +219,8 @@ class TaintVisitor(ast.NodeVisitor):
         if node.value is None:
             return
 
-        visitor = TaintVisitor(node.value, self._tainted_because, self._source)
+        self._check_if_not_tainted(node.value)
 
-        if visitor.tainted_nodes:
-            for item in visitor.tainted_nodes:
-                self._tainted_nodes += [node]
-                self._warn_tainted(node)
 
 
 def taint(function: FunctionDef, argument: str, source):

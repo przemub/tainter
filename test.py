@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from _ast import FunctionDef, Return
 from unittest import TestCase, expectedFailure
 
@@ -5,7 +7,9 @@ from main import load_file, find_subnode, taint, TaintVisitor
 from utils import is_safe, mark_safe
 
 
-def taint_argument(file, function_name, tainted_arg="a", tainted=True):
+def taint_argument(
+    file, function_name, tainted_arg="a", tainted: bool | None = True
+):
     """
     Have a test unit load a Python file, find a function in it,
     taint the argument, run the tainter and make sure that
@@ -13,20 +17,18 @@ def taint_argument(file, function_name, tainted_arg="a", tainted=True):
     """
 
     def decorator(test_unit):
-        source, ast = load_file("examples/" + file)
-        function = find_subnode(
-            ast, FunctionDef, name=function_name
-        )
-        tainter = taint(
-            function, tainted_arg, source
-        )
-
         def call(self: "TainterTestCase"):
+            source, ast = load_file("examples/" + file)
+            function = find_subnode(ast, FunctionDef, name=function_name)
+            tainter = taint(function, tainted_arg, source)
+
             test_unit(self, tainter)
-            if tainted:
-                self.assertTaintedReturn(tainter)
+            if tainted is True:
+                self.assertTainted(function_name, tainter)
+            elif tainted is False:
+                self.assertNotTainted(function_name, tainter)
             else:
-                self.assertNotTaintedReturn(tainter)
+                pass
 
         return call
 
@@ -34,25 +36,20 @@ def taint_argument(file, function_name, tainted_arg="a", tainted=True):
 
 
 class TainterTestCase(TestCase):
-    def assertTaintedReturn(self, tainter: TaintVisitor):
-        tainted_return = find_subnode(tainter.tree, Return)
-        self.assertIn(
-            tainted_return,
-            tainter.tainted_nodes,
-            msg="The return was not tainted, but it should be.",
-        )
+    def assertTainted(self, func: str, tainter: TaintVisitor):
+        self.assertInOutput(f"def {func}", tainter)
 
-    def assertNotTaintedReturn(self, tainter: TaintVisitor):
-        tainted_return = find_subnode(tainter.tree, Return)
-        self.assertNotIn(
-            tainted_return,
-            tainter.tainted_nodes,
-            msg="The return was tainted, but it should not be.",
-        )
+    def assertNotTainted(self, func: str, tainter: TaintVisitor):
+        self.assertNotInOutput(f"def {func}", tainter)
 
     def assertInOutput(self, text: str, tainter: TaintVisitor):
         self.assertIn(
             text, tainter.output, msg=f"{text} was not found in the output."
+        )
+
+    def assertNotInOutput(self, text: str, tainter: TaintVisitor):
+        self.assertNotIn(
+            text, tainter.output, msg=f"{text} was found in the output."
         )
 
     @taint_argument("return_argument.py", "simple")
@@ -97,6 +94,14 @@ class TainterTestCase(TestCase):
 
     @taint_argument("call.py", "unsafe_call")
     def test_unsafe_call(self, tainter):
+        pass
+
+    @taint_argument("call.py", "print_test")
+    def test_print(self, tainter):
+        pass
+
+    @taint_argument("call.py", "mark_output_test")
+    def test_mark_output(self, tainter):
         pass
 
 

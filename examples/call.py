@@ -1,4 +1,4 @@
-from utils import mark_safe
+from utils import mark_safe, mark_output
 
 
 @mark_safe
@@ -19,5 +19,14 @@ def unsafe_call(a):
 
 
 def print_test(a):
-    d = int(a)
-    return d
+    print(a)
+
+
+@mark_output
+def _generate_a_report(a):
+    # sys.write(a, "report.pdf")
+    pass
+
+
+def mark_output_test(a):
+    _generate_a_report(a)
