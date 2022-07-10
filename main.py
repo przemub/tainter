@@ -4,9 +4,11 @@ import argparse
 import ast
 import logging
 import sys
-from _ast import FunctionDef, Return, Name, Assign
+from _ast import FunctionDef, Return, Name, Assign, Call
+from functools import cached_property
 from textwrap import indent
 from typing import TypeVar, Container, Iterable
+from warnings import warn
 
 from termcolor import colored
 
@@ -113,6 +115,26 @@ class TaintVisitor(ast.NodeVisitor):
         self.tree = tree
         self.visit(tree)
 
+    @cached_property
+    def safe_functions(self) -> list[str]:
+        """Collect and return the list of functions marked with mark_safe."""
+        # TODO: Collect also the imported functions.
+        # TODO: Collect functions marked without the @ decorator syntax.
+        #       This will be useful for marking imported functions.
+
+        results = []
+
+        tree = ast.parse(self._source)
+        functions = find_subnodes(tree, [FunctionDef])
+        for function in functions:
+            for decorator in function.decorator_list:
+                if not isinstance(decorator, Name):
+                    continue
+                if decorator.id == "mark_safe":
+                    results.append(function.name)
+
+        return results
+
     @property
     def tainted_variables(self):
         return self._tainted_because.keys()
@@ -134,6 +156,25 @@ class TaintVisitor(ast.NodeVisitor):
                     continue
 
                 self._tainted_because[variable.id] = node
+
+    def visit_Call(self, node: Call):
+        """
+        If the function call was determined safe, don't go down.
+        If the function call was determined an output, shout when a tainted
+        variable is used.
+        Otherwise, continue as usual.
+        """
+
+        if not isinstance(node.func, Name):
+            warn(f"Calls to non-named functions not yet supported. Line: {node.lineno}")
+            return
+        if node.func.id in self.safe_functions:
+            return
+        #if node.func.id in self.output_functions:
+        # pass
+
+        return super().generic_visit(node)
+
 
     def visit_Return(self, node: Return):
         """

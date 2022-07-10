@@ -1,15 +1,15 @@
 from _ast import FunctionDef, Return
-from unittest import TestCase
+from unittest import TestCase, expectedFailure
 
 from main import load_file, find_subnode, taint, TaintVisitor
 from utils import is_safe, mark_safe
 
 
-def taint_argument(file, function_name, tainted_arg="a"):
+def taint_argument(file, function_name, tainted_arg="a", tainted=True):
     """
     Have a test unit load a Python file, find a function in it,
     taint the argument, run the tainter and make sure that
-    the returned value was tainted.
+    the returned value was tainted if tainted=True.
     """
 
     def decorator(test_unit):
@@ -23,7 +23,10 @@ def taint_argument(file, function_name, tainted_arg="a"):
 
         def call(self: "TainterTestCase"):
             test_unit(self, tainter)
-            self.assertTaintedReturn(tainter)
+            if tainted:
+                self.assertTaintedReturn(tainter)
+            else:
+                self.assertNotTaintedReturn(tainter)
 
         return call
 
@@ -36,7 +39,15 @@ class TainterTestCase(TestCase):
         self.assertIn(
             tainted_return,
             tainter.tainted_nodes,
-            msg="The return was not tainted as expected.",
+            msg="The return was not tainted, but it should be.",
+        )
+
+    def assertNotTaintedReturn(self, tainter: TaintVisitor):
+        tainted_return = find_subnode(tainter.tree, Return)
+        self.assertNotIn(
+            tainted_return,
+            tainter.tainted_nodes,
+            msg="The return was tainted, but it should not be.",
         )
 
     def assertInOutput(self, text: str, tainter: TaintVisitor):
@@ -54,10 +65,16 @@ class TainterTestCase(TestCase):
         self.assertInOutput("return a + 5", tainter)
         self.assertInOutput("-> def with_op(a)", tainter)
 
+    @expectedFailure  # TODO
     @taint_argument("return_argument.py", "with_call")
     def test_with_call(self, tainter):
         self.assertInOutput("return math.pow(a, 2)", tainter)
         self.assertInOutput("-> def with_call(a)", tainter)
+
+    @taint_argument("return_argument.py", "with_direct_call")
+    def test_with_call(self, tainter):
+        self.assertInOutput("return _b(a)", tainter)
+        self.assertInOutput("-> def with_direct_call(a)", tainter)
 
     @taint_argument("assignment.py", "reassign")
     def test_reassign(self, tainter):
@@ -72,6 +89,14 @@ class TainterTestCase(TestCase):
         self.assertInOutput("d = c", tainter)
         self.assertInOutput("c = a", tainter)
         self.assertInOutput("->->->-> def chain(a):", tainter)
+        pass
+
+    @taint_argument("call.py", "safe_call", tainted=False)
+    def test_safe_call(self, tainter):
+        pass
+
+    @taint_argument("call.py", "unsafe_call")
+    def test_unsafe_call(self, tainter):
         pass
 
 
