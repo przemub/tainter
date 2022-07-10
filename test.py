@@ -63,7 +63,7 @@ class TainterTestCase(TestCase):
     def test_reassign(self, tainter):
         self.assertInOutput("return b", tainter)
         self.assertInOutput("b = a", tainter)
-        self.assertInOutput("->-> reassign(a)", tainter)
+        self.assertInOutput("->-> def reassign(a)", tainter)
 
     @taint_argument("assignment.py", "chain")
     def test_chain(self, tainter):

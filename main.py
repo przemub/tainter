@@ -8,6 +8,8 @@ from _ast import FunctionDef, Return, Name, Assign
 from textwrap import indent
 from typing import TypeVar, Container, Iterable
 
+from termcolor import colored
+
 T = TypeVar("T", bound=ast.AST)
 
 logger = logging.getLogger(__name__)
@@ -79,7 +81,7 @@ class TaintVisitor(ast.NodeVisitor):
         while counter < underline_end:
             counter += 1
             underline += "^"
-        message += underline
+        message += colored(underline, "red")
 
         tainted_variables = find_subnodes(
             node, (Name,), id=self.tainted_variables
