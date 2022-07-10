@@ -2,32 +2,54 @@ from __future__ import annotations
 
 import argparse
 import ast
+import logging
 import sys
-from _ast import FunctionDef, stmt, Return, Name, Assign
-from typing import TypeVar
+from _ast import FunctionDef, Return, Name, Assign
+from textwrap import indent
+from typing import TypeVar, Container, Iterable
 
-T = TypeVar("T", bound=stmt)
+T = TypeVar("T", bound=ast.AST)
+
+logger = logging.getLogger(__name__)
 
 
-def find_subnode(tree: ast.AST, klass: type[T], **kwargs) -> T | None:
+def find_subnodes(tree: ast.AST, classes: Iterable[type[T]],
+                  **kwargs: Container) -> list[T]:
     """
-    Recursively finds a node in a tree of a given class and with
+    Recursively finds nodes node in a tree of given classes and with
     matching kwargs.
 
-    For example, find_submodule(tree, Name, id="a") will find a variable named
-    "a".
+    For example, find_submodule(tree, [Name], id=["a"]) will find a variable named
+    "a", while find_submodule(tree, [Name], id=["a", "b"]) will find variables
+    named either a or b.
     """
+    items = []
     for item in ast.walk(tree):
-        if isinstance(item, klass) and all(
-                getattr(item, key, None) == value for key, value in
-                kwargs.items()
+        if isinstance(item, tuple(classes)) and all(
+            getattr(item, key, None) in values for key, values in
+            kwargs.items()
         ):
-            return item
+            items.append(item)
 
-    return None
+    return items
+
+
+def find_subnode(tree: ast.AST, klass: type[T], **kwargs) -> T:
+    subnodes = find_subnodes(tree, [klass],
+                             **{key: [val] for key, val in kwargs.items()})
+    if len(subnodes) == 0:
+        raise ValueError("There is no such subnode.")
+    elif len(subnodes) == 1:
+        return subnodes[0]
+    else:
+        raise ValueError("There exists more than one such subnode!")
 
 
 def load_file(filename: str) -> tuple[str, ast.AST]:
+    """
+    Load file and return its contents and AST parsed from
+    the contents.
+    """
     with open(filename) as file:
         data = file.read()
 
@@ -35,22 +57,49 @@ def load_file(filename: str) -> tuple[str, ast.AST]:
 
 
 class TaintVisitor(ast.NodeVisitor):
-    def _warn_tainted(self, node):
-        print(f"Line {node.lineno} tainted:")
+    def _warn_tainted(self, node, tab=0):
+        message = ""
 
-        tab = 0
-        while node:
-            print("->" * tab, end="")
-            print(ast.get_source_segment(self.source, node, padded=True))
+        if node.lineno == node.end_lineno:
+            message += f"Line {node.lineno} tainted:\n"
+        else:
+            message += f"Lines {node.lineno}-{node.end_lineno} tainted:\n"
 
-            tab += 1
-            node = self.tainted_because.get(node, None)
+        # Print the whole tainted line
+        node.col_offset = 0
+        node.end_col_offset = -1
+        message += ast.get_source_segment(self._source, node)
 
-    def __init__(self, tainted_variables: set, source: str):
-        self.tainted_variables = tainted_variables
-        self.tainted_because = {}
-        self.source = source
+        tainted_variables = find_subnodes(
+            node, (Name,), id=self.tainted_variables
+        )
+
+        prefix = "->" * tab + " "
+        output = indent(message, prefix, lambda _: tab > 0)
+        self.output += output
+        print(output)
+
+        tab += 1
+        for variable in tainted_variables:
+            reason = self._tainted_because[variable.id]
+            if reason is node:
+                continue
+
+            self._warn_tainted(
+                reason, tab
+            )
+
+    def __init__(self, tainted_because: dict[str, ast.AST], source: str):
+        self._source = source
+        self._tainted_because = tainted_because
         self._tainted_nodes: list[ast.AST] = []
+
+        # Preserve output for further analysis.
+        self.output = ""
+
+    @property
+    def tainted_variables(self):
+        return self._tainted_because.keys()
 
     @property
     def tainted_nodes(self):
@@ -61,13 +110,15 @@ class TaintVisitor(ast.NodeVisitor):
             self._tainted_nodes.append(node)
 
     def visit_Assign(self, node: Assign):
-        visitor = TaintVisitor(self.tainted_variables, self.source)
+        visitor = TaintVisitor(self._tainted_because, self._source)
         visitor.visit(node.value)
 
         if visitor.tainted_nodes:
             for variable in node.targets:
-                self.tainted_variables.add(variable.id)
-                self.tainted_because[variable.id] = node
+                if not isinstance(variable, Name):
+                    continue
+
+                self._tainted_because[variable.id] = node
 
     def visit_Return(self, node: Return):
         """
@@ -77,7 +128,7 @@ class TaintVisitor(ast.NodeVisitor):
         if node.value is None:
             return
 
-        visitor = TaintVisitor(self.tainted_variables, self.source)
+        visitor = TaintVisitor(self._tainted_because, self._source)
         visitor.visit(node.value)
 
         if visitor.tainted_nodes:
@@ -87,11 +138,13 @@ class TaintVisitor(ast.NodeVisitor):
 
 
 def taint(function: FunctionDef, argument: str, source):
-    if not (argument in (arg.arg for arg in function.args.args)):
-        raise ValueError("The given argument does not exist in this function.")
+    for arg in function.args.args:
+        if arg.arg == argument:
+            visitor = TaintVisitor({argument: arg}, source)
+            visitor.visit(function)
+            return visitor
 
-    visitor = TaintVisitor(argument, source)
-    visitor.visit(function)
+    raise ValueError("The given argument does not exist in this function.")
 
 
 if __name__ == "__main__":
@@ -103,11 +156,16 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     source, my_ast = load_file(args.filename)
-    function = find_subnode(my_ast, FunctionDef, name=args.function)
+    functions = find_subnodes(my_ast, (FunctionDef,), name=[args.function])
 
-    if function is None:
+    if not functions:
         print("This function does not exist in the file!")
         sys.exit(1)
+    elif len(functions) > 1:
+        print("There is more than one such function?")
+        sys.exit(2)
+
+    function = functions[0]
 
     if args.dump:
         print(ast.dump(function, indent=2))

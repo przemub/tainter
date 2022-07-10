@@ -1,7 +1,7 @@
 from _ast import FunctionDef, Return
 from unittest import TestCase
 
-from main import load_file, find_subnode, TaintVisitor
+from main import load_file, find_subnode, taint
 from utils import is_safe, mark_safe
 
 
@@ -9,8 +9,7 @@ class TainterTestCase(TestCase):
     def test_simple(self):
         source, my_ast = load_file("examples/return_argument.py")
         function = find_subnode(my_ast, FunctionDef, name="simple")
-        tainter = TaintVisitor({"a"}, source)
-        tainter.visit(function)
+        tainter = taint(function, "a", source)
 
         tainted_return = find_subnode(function, Return)
         self.assertIn(tainted_return, tainter.tainted_nodes)
@@ -18,8 +17,7 @@ class TainterTestCase(TestCase):
     def test_with_op(self):
         source, my_ast = load_file("examples/return_argument.py")
         function = find_subnode(my_ast, FunctionDef, name="with_op")
-        tainter = TaintVisitor({"a"}, source)
-        tainter.visit(function)
+        tainter = taint(function, "a", source)
 
         tainted_return = find_subnode(function, Return)
         self.assertIn(tainted_return, tainter.tainted_nodes)
@@ -28,8 +26,7 @@ class TainterTestCase(TestCase):
     def test_with_call(self):
         source, my_ast = load_file("examples/return_argument.py")
         function = find_subnode(my_ast, FunctionDef, name="with_call")
-        tainter = TaintVisitor({"a"}, source)
-        tainter.visit(function)
+        tainter = taint(function, "a", source)
 
         tainted_return = find_subnode(function, Return)
         self.assertIn(tainted_return, tainter.tainted_nodes)
@@ -38,8 +35,7 @@ class TainterTestCase(TestCase):
     def test_reassign(self):
         source, my_ast = load_file("examples/assignment.py")
         function = find_subnode(my_ast, FunctionDef, name="reassign")
-        tainter = TaintVisitor({"a"}, source)
-        tainter.visit(function)
+        tainter = taint(function, "a", source)
 
         tainted_return = find_subnode(function, Return)
         self.assertIn(tainted_return, tainter.tainted_nodes)
@@ -47,8 +43,7 @@ class TainterTestCase(TestCase):
     def test_chain(self):
         source, my_ast = load_file("examples/assignment.py")
         function = find_subnode(my_ast, FunctionDef, name="chain")
-        tainter = TaintVisitor({"a"}, source)
-        tainter.visit(function)
+        tainter = taint(function, "a", source)
 
         tainted_return = find_subnode(function, Return)
         self.assertIn(tainted_return, tainter.tainted_nodes)
