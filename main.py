@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import ast
 import sys
-from _ast import FunctionDef, stmt, Return, Name
+from _ast import FunctionDef, stmt, Return, Name, Assign
 from typing import TypeVar
 
 T = TypeVar("T", bound=stmt)
@@ -35,17 +35,20 @@ def load_file(filename: str) -> tuple[str, ast.AST]:
 
 
 class TaintVisitor(ast.NodeVisitor):
-    def _warn_tainted(self, node, subnode):
+    def _warn_tainted(self, node):
         print(f"Line {node.lineno} tainted:")
 
-        print(ast.get_source_segment(self.source, node, padded=True))
-        print("-> ", end="")
-        print(ast.get_source_segment(self.source, subnode, padded=True))
+        tab = 0
+        while node:
+            print("->" * tab, end="")
+            print(ast.get_source_segment(self.source, node, padded=True))
 
-        print()
+            tab += 1
+            node = self.tainted_because.get(node, None)
 
     def __init__(self, tainted_variables: set, source: str):
         self.tainted_variables = tainted_variables
+        self.tainted_because = {}
         self.source = source
         self._tainted_nodes: list[ast.AST] = []
 
@@ -56,6 +59,15 @@ class TaintVisitor(ast.NodeVisitor):
     def visit_Name(self, node: Name):
         if node.id in self.tainted_variables:
             self._tainted_nodes.append(node)
+
+    def visit_Assign(self, node: Assign):
+        visitor = TaintVisitor(self.tainted_variables, self.source)
+        visitor.visit(node.value)
+
+        if visitor.tainted_nodes:
+            for variable in node.targets:
+                self.tainted_variables.add(variable.id)
+                self.tainted_because[variable.id] = node
 
     def visit_Return(self, node: Return):
         """
@@ -69,10 +81,9 @@ class TaintVisitor(ast.NodeVisitor):
         visitor.visit(node.value)
 
         if visitor.tainted_nodes:
-            self._tainted_nodes += [node]
-
             for item in visitor.tainted_nodes:
-                self._warn_tainted(node, item)
+                self._tainted_nodes += [node]
+                self._warn_tainted(node)
 
 
 def taint(function: FunctionDef, argument: str, source):
