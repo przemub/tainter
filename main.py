@@ -267,5 +267,5 @@ in file assingment.py.
     if args.dump:
         print(ast.dump(function, indent=2))
 
-    for argument in args.taint or []:
+    for argument in args.tainted_arg or []:
         taint(function, argument, source)
